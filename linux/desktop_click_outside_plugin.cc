@@ -178,25 +178,35 @@ static void handle_raw_button_press(DesktopClickOutsidePlugin* self,
     return;
   }
 
+  GdkDisplay* gdk_display = gdk_display_get_default();
+  gdk_x11_display_error_trap_push(gdk_display);
+
+  gboolean notify = FALSE;
   Window pointer_window = query_window_under_pointer(display);
   if (pointer_window == 0) {
-    notify_click_outside(self);
-    return;
-  }
-
-  guint pid = 0;
-  Window client_window =
-      find_client_window_with_pid(display, pointer_window, &pid);
-  if (pid == static_cast<guint>(getpid())) {
-    // The main window is outside the popup; other same-process windows are
-    // treated as popup windows and ignored.
-    if (client_window == self->main_window) {
-      notify_click_outside(self);
+    notify = TRUE;
+  } else {
+    guint pid = 0;
+    Window client_window =
+        find_client_window_with_pid(display, pointer_window, &pid);
+    if (pid == static_cast<guint>(getpid())) {
+      // The main window is outside the popup; other same-process windows are
+      // treated as popup windows and ignored.
+      notify = client_window == self->main_window;
+    } else {
+      notify = TRUE;
     }
-    return;
   }
 
-  notify_click_outside(self);
+  gint trap_code = gdk_x11_display_error_trap_pop(gdk_display);
+  if (trap_code != Success) {
+    g_warning("desktop_click_outside: pointer window query failed (x_error=%d)",
+              trap_code);
+  }
+
+  if (notify) {
+    notify_click_outside(self);
+  }
 }
 
 static GdkFilterReturn on_x11_root_event(GdkXEvent* xevent, GdkEvent* event,
@@ -235,12 +245,6 @@ static gboolean ensure_xinput_listener(DesktopClickOutsidePlugin* self) {
     return FALSE;
   }
 
-  int major = 2;
-  int minor = 0;
-  if (XIQueryVersion(display, &major, &minor) != Success) {
-    return FALSE;
-  }
-
   self->main_window = get_main_window(self);
   if (self->main_window == 0) {
     return FALSE;
@@ -257,8 +261,16 @@ static gboolean ensure_xinput_listener(DesktopClickOutsidePlugin* self) {
   event_mask.deviceid = XIAllMasterDevices;
   event_mask.mask_len = sizeof(mask);
   event_mask.mask = mask;
-  XISelectEvents(display, DefaultRootWindow(display), &event_mask, 1);
+
+  gdk_x11_display_error_trap_push(gdk_display);
+  Status select_status = XISelectEvents(display, DefaultRootWindow(display), &event_mask, 1);
   XFlush(display);
+  gint trap_code = gdk_x11_display_error_trap_pop(gdk_display);
+  if (select_status != Success || trap_code != Success) {
+    g_warning("desktop_click_outside: XISelectEvents failed (status=%d, x_error=%d)",
+              select_status, trap_code);
+    return FALSE;
+  }
 
   gdk_window_add_filter(self->root_window, on_x11_root_event, self);
   self->filter_installed = TRUE;
