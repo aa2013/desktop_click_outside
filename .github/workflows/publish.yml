@@ -1,0 +1,20 @@
+# 自动发布到 pub.dev
+# 触发条件：推送 v0.0.1 形式的版本标签，需与 pub.dev 上配置的 tag 模式保持一致
+name: Publish to pub.dev
+
+on:
+  push:
+    tags:
+    # 必须与 pub.dev 上配置的 tag 模式对齐，pub.dev 常见配置为 'v{{version}}'
+    - 'v[0-9]+.[0-9]+.[0-9]+'
+    # 若偏好使用无 v 前缀的标签（如 1.2.3），则改用：
+    # - '[0-9]+.[0-9]+.[0-9]+' # pub.dev tag 模式: '{{version}}'
+
+# 复用 dart-lang 官方发布的可复用工作流
+jobs:
+  publish:
+    permissions:
+      id-token: write # 使用 OIDC 认证发布所需
+    uses: dart-lang/setup-dart/.github/workflows/publish.yml@v1
+    # with:
+    #   working-directory: path/to/package/within/repository
